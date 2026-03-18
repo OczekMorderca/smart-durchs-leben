@@ -6,23 +6,16 @@ export function useSpeech(lang = 'pl-PL') {
   const [error, setError] = useState(null);
   const recognitionRef = useRef(null);
   const finalTextRef = useRef('');
-  const finalCountRef = useRef(0);
+  const shouldListenRef = useRef(false);
 
   const isSupported = 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
 
-  const start = useCallback(() => {
-    if (!isSupported) {
-      setError('Twoja przeglądarka nie obsługuje rozpoznawania mowy.');
-      return;
-    }
-    finalTextRef.current = '';
-    finalCountRef.current = 0;
-
+  function createAndStart() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     recognition.lang = lang;
     recognition.interimResults = true;
-    recognition.continuous = true;
+    recognition.continuous = false;
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => {
@@ -31,49 +24,57 @@ export function useSpeech(lang = 'pl-PL') {
     };
 
     recognition.onresult = (event) => {
-      // Only add results that haven't been finalized yet
-      for (let i = finalCountRef.current; i < event.results.length; i++) {
+      let interimText = '';
+      for (let i = 0; i < event.results.length; i++) {
         if (event.results[i].isFinal) {
           finalTextRef.current += event.results[i][0].transcript + ' ';
-          finalCountRef.current = i + 1;
-        }
-      }
-
-      // Show current interim text (everything after last final)
-      let interimText = '';
-      for (let i = finalCountRef.current; i < event.results.length; i++) {
-        if (!event.results[i].isFinal) {
+        } else {
           interimText += event.results[i][0].transcript;
         }
       }
-
       setTranscript(finalTextRef.current + interimText);
     };
 
     recognition.onerror = (event) => {
-      if (event.error !== 'no-speech') {
-        setError(`Błąd: ${event.error}`);
-      }
+      if (event.error === 'no-speech') return;
+      shouldListenRef.current = false;
+      setError(`Błąd: ${event.error}`);
       setIsListening(false);
     };
 
     recognition.onend = () => {
-      setIsListening(false);
+      if (shouldListenRef.current) {
+        // Auto-restart after each phrase
+        try { recognition.start(); } catch {}
+      } else {
+        setIsListening(false);
+      }
     };
 
     recognitionRef.current = recognition;
     recognition.start();
+  }
+
+  const start = useCallback(() => {
+    if (!isSupported) {
+      setError('Twoja przeglądarka nie obsługuje rozpoznawania mowy.');
+      return;
+    }
+    finalTextRef.current = '';
+    shouldListenRef.current = true;
+    setTranscript('');
+    createAndStart();
   }, [lang, isSupported]);
 
   const stop = useCallback(() => {
+    shouldListenRef.current = false;
     if (recognitionRef.current) {
-      recognitionRef.current.stop();
+      try { recognitionRef.current.stop(); } catch {}
     }
   }, []);
 
   const reset = useCallback(() => {
     finalTextRef.current = '';
-    finalCountRef.current = 0;
     setTranscript('');
     setError(null);
   }, []);
