@@ -5,6 +5,7 @@ export function useSpeech(lang = 'pl-PL') {
   const [transcript, setTranscript] = useState('');
   const [error, setError] = useState(null);
   const recognitionRef = useRef(null);
+  const finalTextRef = useRef('');
 
   const isSupported = 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
 
@@ -13,6 +14,8 @@ export function useSpeech(lang = 'pl-PL') {
       setError('Twoja przeglądarka nie obsługuje rozpoznawania mowy.');
       return;
     }
+    finalTextRef.current = '';
+
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     recognition.lang = lang;
@@ -26,15 +29,24 @@ export function useSpeech(lang = 'pl-PL') {
     };
 
     recognition.onresult = (event) => {
-      let full = '';
-      for (let i = 0; i < event.results.length; i++) {
-        full += event.results[i][0].transcript;
+      let interimText = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          finalTextRef.current += result[0].transcript;
+        } else {
+          interimText += result[0].transcript;
+        }
       }
-      setTranscript(full);
+
+      setTranscript(finalTextRef.current + interimText);
     };
 
     recognition.onerror = (event) => {
-      setError(`Błąd: ${event.error}`);
+      if (event.error !== 'no-speech') {
+        setError(`Błąd: ${event.error}`);
+      }
       setIsListening(false);
     };
 
@@ -53,6 +65,7 @@ export function useSpeech(lang = 'pl-PL') {
   }, []);
 
   const reset = useCallback(() => {
+    finalTextRef.current = '';
     setTranscript('');
     setError(null);
   }, []);
