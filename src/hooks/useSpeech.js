@@ -6,6 +6,7 @@ export function useSpeech(lang = 'pl-PL') {
   const [error, setError] = useState(null);
   const recognitionRef = useRef(null);
   const finalTextRef = useRef('');
+  const finalCountRef = useRef(0);
 
   const isSupported = 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
 
@@ -15,6 +16,7 @@ export function useSpeech(lang = 'pl-PL') {
       return;
     }
     finalTextRef.current = '';
+    finalCountRef.current = 0;
 
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
@@ -29,14 +31,19 @@ export function useSpeech(lang = 'pl-PL') {
     };
 
     recognition.onresult = (event) => {
-      let interimText = '';
+      // Only add results that haven't been finalized yet
+      for (let i = finalCountRef.current; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          finalTextRef.current += event.results[i][0].transcript + ' ';
+          finalCountRef.current = i + 1;
+        }
+      }
 
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i];
-        if (result.isFinal) {
-          finalTextRef.current += result[0].transcript;
-        } else {
-          interimText += result[0].transcript;
+      // Show current interim text (everything after last final)
+      let interimText = '';
+      for (let i = finalCountRef.current; i < event.results.length; i++) {
+        if (!event.results[i].isFinal) {
+          interimText += event.results[i][0].transcript;
         }
       }
 
@@ -66,6 +73,7 @@ export function useSpeech(lang = 'pl-PL') {
 
   const reset = useCallback(() => {
     finalTextRef.current = '';
+    finalCountRef.current = 0;
     setTranscript('');
     setError(null);
   }, []);

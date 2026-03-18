@@ -66,7 +66,7 @@ export default function Sidebar({ projects, subprojects, selected, onSelect, onC
               {expandedProject === project.id ? '▾' : '▸'} {project.name}
             </span>
             <div className="project-btns">
-              <button className="btn-icon" onClick={() => setAddingSubTo(addingSubTo === project.id ? null : project.id)} title="Dodaj podprojekt">＋</button>
+              <button className="btn-icon" onClick={e => { e.stopPropagation(); setAddingSubTo(addingSubTo === project.id ? null : project.id); }} title="Dodaj podprojekt">＋</button>
               <button className="btn-icon danger" onClick={e => handleDeleteProject(e, project.id)} title="Usuń projekt">✕</button>
             </div>
           </div>

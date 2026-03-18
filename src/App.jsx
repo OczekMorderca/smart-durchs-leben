@@ -53,7 +53,7 @@ export default function App() {
           projects={projects}
           subprojects={subprojects}
           selected={selected}
-          onSelect={(sel) => { setSelected(sel); setSidebarOpen(false); }}
+          onSelect={(sel) => { setSelected(sel); if (sel.subprojectId) setSidebarOpen(false); }}
           onChanged={loadProjects}
         />
 
