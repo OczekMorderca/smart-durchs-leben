@@ -40,11 +40,11 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <button className="menu-btn" onClick={() => setSidebarOpen(o => !o)}>☰</button>
         <h1 className="app-title">🎤 Dyktafon</h1>
         <button className="settings-btn" onClick={() => setView(v => v === 'settings' ? 'notes' : 'settings')}>
           ⚙️
         </button>
+        <button className="menu-btn" onClick={() => setSidebarOpen(o => !o)}>☰</button>
       </header>
 
       <div className={`layout ${sidebarOpen ? 'sidebar-visible' : ''}`}>
