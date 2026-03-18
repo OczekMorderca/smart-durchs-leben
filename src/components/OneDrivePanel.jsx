@@ -33,15 +33,24 @@ async function buildTextExport() {
   return lines.join('\n');
 }
 
-export default function ExportPanel() {
+export default function ExportPanel({ currentProject, currentSub }) {
   const [status, setStatus] = useState(null);
+
+  function buildFileName(ext) {
+    const now = new Date();
+    const date = now.toLocaleDateString('pl-PL').replace(/\./g, '-');
+    const time = now.toTimeString().slice(0, 5).replace(':', '-');
+    const proj = currentProject?.name ?? 'Dyktafon';
+    const base = currentSub?.name ? `${proj}.${currentSub.name}` : proj;
+    return `${base}_${date}_${time}.${ext}`;
+  }
 
   async function handleShareText() {
     try {
       setStatus('Przygotowuję...');
       const text = await buildTextExport();
       const blob = new Blob([text], { type: 'text/plain' });
-      const file = new File([blob], `dyktafon_${new Date().toISOString().slice(0,10)}.txt`, { type: 'text/plain' });
+      const file = new File([blob], buildFileName('txt'), { type: 'text/plain' });
 
       if (navigator.share && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], title: 'Dyktafon — notatki' });
@@ -68,7 +77,7 @@ export default function ExportPanel() {
       const data = await exportAllData();
       const json = JSON.stringify(data, null, 2);
       const blob = new Blob([json], { type: 'application/json' });
-      const file = new File([blob], `dyktafon_backup_${new Date().toISOString().slice(0,10)}.json`, { type: 'application/json' });
+      const file = new File([blob], buildFileName('json'), { type: 'application/json' });
 
       if (navigator.share && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], title: 'Dyktafon — backup JSON' });

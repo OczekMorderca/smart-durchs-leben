@@ -59,7 +59,7 @@ export default function App() {
 
         <main className="main-content">
           {view === 'settings' ? (
-            <OneDrivePanel />
+            <OneDrivePanel currentProject={currentProject} currentSub={currentSub} />
           ) : (
             <>
               <div className="breadcrumb">
