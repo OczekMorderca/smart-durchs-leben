@@ -329,6 +329,21 @@ body {
 .od-status-msg { font-size: 13px; color: #2ecc71; }
 .export-buttons { display: flex; flex-direction: column; gap: 10px; }
 
+/* ===== Photos ===== */
+.photo-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.photo-thumb-wrap { position: relative; }
+.photo-thumb { width: 80px; height: 80px; object-fit: cover; border-radius: 6px; cursor: pointer; display: block; }
+.photo-remove {
+  position: absolute; top: 2px; right: 2px;
+  background: rgba(0,0,0,0.65); color: #fff; border: none; border-radius: 50%;
+  width: 20px; height: 20px; font-size: 11px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; line-height: 1;
+}
+
+.btn-photo { background: var(--surface); border: 1px solid var(--border); color: var(--text); font-size: 18px; padding: 6px 10px; }
+.btn-photo:hover:not(:disabled) { background: var(--border); }
+.btn-photo:disabled { opacity: 0.45; cursor: not-allowed; }
+
 /* ===== Misc ===== */
 .error { color: var(--danger); font-size: 13px; padding: 8px 12px; background: rgba(224,82,82,0.1); border-radius: var(--radius-sm); border: 1px solid rgba(224,82,82,0.3); }
 
