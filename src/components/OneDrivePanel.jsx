@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { exportAllData, getProjects, getSubprojects, getNotes } from '../db';
+import { exportAllData, getProjects, getSubprojects, getNotes, getPhotos } from '../db';
 
 function formatDate(ts) {
   return new Date(ts).toLocaleString('pl-PL');
@@ -33,6 +33,32 @@ async function buildTextExport() {
   return lines.join('\n');
 }
 
+async function collectPhotoFiles() {
+  const projects = await getProjects();
+  const files = [];
+
+  for (const project of projects) {
+    const subs = await getSubprojects(project.id);
+    for (const sub of subs) {
+      const notes = await getNotes(sub.id);
+      const base = `${project.name}.${sub.name}`;
+      for (const note of notes) {
+        const photos = await getPhotos(note.id);
+        const noteDate = new Date(note.createdAt)
+          .toLocaleString('pl-PL')
+          .replace(/[\s:]/g, '-')
+          .replace(/,/g, '');
+        photos.forEach((p, i) => {
+          const ext = p.mimeType.split('/')[1] || 'jpg';
+          const name = `${base}_${noteDate}_foto${String(i + 1).padStart(2, '0')}.${ext}`;
+          files.push(new File([p.blob], name, { type: p.mimeType }));
+        });
+      }
+    }
+  }
+  return files;
+}
+
 export default function ExportPanel({ currentProject, currentSub }) {
   const [status, setStatus] = useState(null);
 
@@ -49,18 +75,19 @@ export default function ExportPanel({ currentProject, currentSub }) {
     try {
       setStatus('Przygotowuję...');
       const text = await buildTextExport();
-      const blob = new Blob([text], { type: 'text/plain' });
-      const file = new File([blob], buildFileName('txt'), { type: 'text/plain' });
+      const txtBlob = new Blob([text], { type: 'text/plain' });
+      const txtFile = new File([txtBlob], buildFileName('txt'), { type: 'text/plain' });
+      const photoFiles = await collectPhotoFiles();
+      const allFiles = [txtFile, ...photoFiles];
 
-      if (navigator.share && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: 'Dyktafon — notatki' });
-        setStatus('Udostępniono!');
+      if (navigator.share && navigator.canShare({ files: allFiles })) {
+        await navigator.share({ files: allFiles, title: 'Dyktafon — notatki' });
+        setStatus(`Udostępniono! (${photoFiles.length > 0 ? `tekst + ${photoFiles.length} zdjęć` : 'tylko tekst'})`);
       } else {
-        // Fallback: download
-        const url = URL.createObjectURL(blob);
+        const url = URL.createObjectURL(txtBlob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = file.name;
+        a.download = txtFile.name;
         a.click();
         URL.revokeObjectURL(url);
         setStatus('Pobrano plik — zapisz go do folderu OneDrive.');
@@ -101,12 +128,12 @@ export default function ExportPanel({ currentProject, currentSub }) {
     <div className="onedrive-panel">
       <h3>☁️ Eksport do OneDrive</h3>
       <p className="od-info">
-        Naciśnij przycisk — Android otworzy menu "Udostępnij". Wybierz aplikację <strong>OneDrive</strong> i plik zostanie tam zapisany.
+        Naciśnij przycisk — Android otworzy menu "Udostępnij". Wybierz aplikację <strong>OneDrive</strong> i pliki zostaną tam zapisane.
       </p>
 
       <div className="export-buttons">
         <button className="btn btn-ms" onClick={handleShareText}>
-          📄 Eksportuj jako TXT
+          📄 Eksportuj TXT + zdjęcia
         </button>
         <button className="btn btn-sync" onClick={handleShareJson}>
           💾 Eksportuj jako JSON (backup)
