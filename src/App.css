@@ -351,3 +351,41 @@ body {
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* Import button */
+.btn-import {
+  background: #2ea44f;
+  color: #fff;
+}
+.btn-import:hover {
+  background: #2c974b;
+}
+.btn-danger {
+  background: #d73a49;
+  color: #fff;
+}
+.btn-danger:hover {
+  background: #c0303d;
+}
+
+/* Import confirmation box */
+.import-confirm {
+  margin: 12px 0;
+  padding: 12px 14px;
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+.dark .import-confirm {
+  background: #3a2e00;
+  border-color: #ffc107;
+  color: #ffe082;
+}
+.import-confirm p {
+  margin: 0 0 10px;
+}
+.import-confirm-buttons {
+  display: flex;
+  gap: 8px;
+}
