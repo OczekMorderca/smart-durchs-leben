@@ -72,20 +72,43 @@ export default function ExportPanel({ currentProject, currentSub }) {
   const [preparedData, setPreparedData] = useState(null);
   const fileInputRef = useRef(null);
   const shareButtonRef = useRef(null);
+  const diagButtonRef = useRef(null);
   const preparedDataRef = useRef(null);
 
   useEffect(() => {
     preparedDataRef.current = preparedData;
   }, [preparedData]);
 
+  // Natywny listener dla przycisku diagnostycznego
+  useEffect(() => {
+    const btn = diagButtonRef.current;
+    if (!btn) return;
+    function diagHandler() {
+      const isActive = navigator.userActivation ? String(navigator.userActivation.isActive) : 'brak';
+      const hasShare = String(!!navigator.share);
+      const canShareText = navigator.canShare
+        ? String(navigator.canShare({ files: [new File(['x'], 'x.txt', { type: 'text/plain' })] }))
+        : 'brak';
+      setStatus(`isActive=${isActive} share=${hasShare} canShare(txt)=${canShareText} — próbuję...`);
+      if (!navigator.share) { setStatus('navigator.share nie istnieje'); return; }
+      navigator.share({
+        files: [new File(['test'], 'test.txt', { type: 'text/plain' })],
+        title: 'Test'
+      })
+        .then(() => setStatus('DIAGNOZA: share działa! Pliki testowe OK.'))
+        .catch(e => setStatus(`DIAGNOZA: ${e.name}: ${e.message} | isActive=${isActive} canShare=${canShareText}`));
+    }
+    btn.addEventListener('click', diagHandler);
+    return () => btn.removeEventListener('click', diagHandler);
+  }, []);
+
+  // Natywny listener dla przycisku "Udostępnij teraz"
   useEffect(() => {
     const btn = shareButtonRef.current;
     if (!btn) return;
-
     function nativeShareHandler() {
       const data = preparedDataRef.current;
       if (!data) return;
-
       const txtFiles = data.subFiles.map(f =>
         new File([new Blob([f.text], { type: 'text/plain' })], f.name, { type: 'text/plain' })
       );
@@ -93,59 +116,56 @@ export default function ExportPanel({ currentProject, currentSub }) {
         new File([p.blob], p.name, { type: 'image/jpeg' })
       );
       const allFiles = [...txtFiles, ...photoFiles];
-
       if (!navigator.share) {
-        for (const file of txtFiles) {
-          const url = URL.createObjectURL(file);
-          const a = document.createElement('a');
-          a.href = url; a.download = file.name; a.click();
-          URL.revokeObjectURL(url);
-        }
+        downloadAll(txtFiles);
         setPreparedData(null);
         preparedDataRef.current = null;
         setStatus(`Pobrano ${txtFiles.length} plików TXT.`);
         return;
       }
-
       let filesToShare = allFiles;
-      try {
-        if (!navigator.canShare({ files: allFiles })) {
-          filesToShare = txtFiles;
-        }
-      } catch (_) {
-        filesToShare = txtFiles;
-      }
-
+      try { if (!navigator.canShare({ files: allFiles })) filesToShare = txtFiles; } catch (_) { filesToShare = txtFiles; }
       navigator.share({ files: filesToShare, title: 'Dyktafon — notatki' })
-        .then(() => {
-          setPreparedData(null);
-          preparedDataRef.current = null;
-          setStatus('Udostępniono!');
-        })
-        .catch(e => {
-          if (e.name !== 'AbortError') setStatus(`Błąd: ${e.message}`);
-          else setStatus(null);
-        });
+        .then(() => { setPreparedData(null); preparedDataRef.current = null; setStatus('Udostępniono!'); })
+        .catch(e => { if (e.name !== 'AbortError') setStatus(`Błąd: ${e.message}`); else setStatus(null); });
     }
-
     btn.addEventListener('click', nativeShareHandler);
     return () => btn.removeEventListener('click', nativeShareHandler);
   }, []);
+
+  function downloadAll(files) {
+    for (const file of files) {
+      const url = URL.createObjectURL(file);
+      const a = document.createElement('a');
+      a.href = url; a.download = file.name; a.click();
+      URL.revokeObjectURL(url);
+    }
+  }
 
   async function handlePrepare() {
     try {
       setStatus('Przygotowuję...');
       const subFiles = await buildSubprojectFiles();
-      if (!subFiles.length) {
-        setStatus('Brak notatek do eksportu.');
-        return;
-      }
+      if (!subFiles.length) { setStatus('Brak notatek do eksportu.'); return; }
       const photos = await collectPhotoData();
       setPreparedData({ subFiles, photos });
       setStatus(`Gotowe: ${subFiles.length} plik(i) TXT${photos.length > 0 ? ` + ${photos.length} zdjęć` : ''}. Naciśnij "Udostępnij teraz".`);
-    } catch (e) {
-      setStatus(`Błąd przygotowania: ${e.message}`);
-    }
+    } catch (e) { setStatus(`Błąd przygotowania: ${e.message}`); }
+  }
+
+  async function handleDownloadAll() {
+    try {
+      setStatus('Przygotowuję pliki do pobrania...');
+      const subFiles = await buildSubprojectFiles();
+      if (!subFiles.length) { setStatus('Brak notatek.'); return; }
+      const txtFiles = subFiles.map(f =>
+        new File([new Blob([f.text], { type: 'text/plain' })], f.name, { type: 'text/plain' })
+      );
+      const photoData = await collectPhotoData();
+      const photoFiles = photoData.map(p => new File([p.blob], p.name, { type: 'image/jpeg' }));
+      downloadAll([...txtFiles, ...photoFiles]);
+      setStatus(`Pobrano ${txtFiles.length} TXT + ${photoFiles.length} zdjęć → znajdziesz je w Pobrane.`);
+    } catch (e) { setStatus(`Błąd: ${e.message}`); }
   }
 
   async function handleShareJson() {
@@ -155,22 +175,16 @@ export default function ExportPanel({ currentProject, currentSub }) {
       const json = JSON.stringify(data, null, 2);
       const blob = new Blob([json], { type: 'application/json' });
       const now = new Date();
-      const date = now.toLocaleDateString('pl-PL').replace(/\./g, '-');
-      const time = now.toTimeString().slice(0, 5).replace(':', '-');
-      const fileName = `Dyktafon_backup_${date}_${time}.json`;
+      const fileName = `Dyktafon_backup_${now.toLocaleDateString('pl-PL').replace(/\./g,'-')}_${now.toTimeString().slice(0,5).replace(':','-')}.json`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url; a.download = fileName; a.click();
       URL.revokeObjectURL(url);
-      setStatus('Pobrano kopię zapasową — zapisz ją w bezpiecznym miejscu.');
-    } catch (e) {
-      setStatus(`Błąd: ${e.message}`);
-    }
+      setStatus('Pobrano kopię zapasową.');
+    } catch (e) { setStatus(`Błąd: ${e.message}`); }
   }
 
-  function handleImportClick() {
-    fileInputRef.current?.click();
-  }
+  function handleImportClick() { fileInputRef.current?.click(); }
 
   async function handleFileSelected(e) {
     const file = e.target.files?.[0];
@@ -180,16 +194,9 @@ export default function ExportPanel({ currentProject, currentSub }) {
       setStatus('Wczytuję plik...');
       const text = await file.text();
       const data = JSON.parse(text);
-      if (!data.projects || !data.subprojects || !data.notes) {
-        setStatus('Błąd: nieprawidłowy plik kopii zapasowej.');
-        return;
-      }
-      setPendingData(data);
-      setConfirmImport(true);
-      setStatus(null);
-    } catch {
-      setStatus('Błąd: nie udało się odczytać pliku JSON.');
-    }
+      if (!data.projects || !data.subprojects || !data.notes) { setStatus('Błąd: nieprawidłowy plik.'); return; }
+      setPendingData(data); setConfirmImport(true); setStatus(null);
+    } catch { setStatus('Błąd: nie udało się odczytać pliku JSON.'); }
   }
 
   async function handleConfirmImport() {
@@ -200,27 +207,18 @@ export default function ExportPanel({ currentProject, currentSub }) {
       setPendingData(null);
       setStatus('Import zakończony! Odświeżam...');
       setTimeout(() => window.location.reload(), 1500);
-    } catch (e) {
-      setStatus(`Błąd importu: ${e.message}`);
-    }
+    } catch (e) { setStatus(`Błąd importu: ${e.message}`); }
   }
 
-  function handleCancelImport() {
-    setConfirmImport(false);
-    setPendingData(null);
-    setStatus(null);
-  }
+  function handleCancelImport() { setConfirmImport(false); setPendingData(null); setStatus(null); }
 
   return (
     <div className="onedrive-panel">
       <h3>☁️ Eksport do OneDrive</h3>
-      <p className="od-info">
-        Naciśnij "Przygotuj", poczekaj na potwierdzenie, a potem naciśnij "Udostępnij teraz".
-      </p>
 
       <div className="export-buttons">
         <button className="btn btn-ms" onClick={handlePrepare}>
-          📦 Przygotuj TXT + zdjęcia
+          📦 Przygotuj + Udostępnij (Share API)
         </button>
         <button
           ref={shareButtonRef}
@@ -229,21 +227,25 @@ export default function ExportPanel({ currentProject, currentSub }) {
         >
           🚀 Udostępnij teraz
         </button>
+        <button className="btn btn-ms" onClick={handleDownloadAll} style={{background:'#1a73e8'}}>
+          ⬇️ Pobierz pliki (do folderu Pobrane)
+        </button>
         <button className="btn btn-sync" onClick={handleShareJson}>
           💾 Pobierz JSON (backup)
         </button>
         <button className="btn btn-import" onClick={handleImportClick}>
           📥 Importuj z JSON
         </button>
+        <button
+          ref={diagButtonRef}
+          className="btn"
+          style={{fontSize:'0.8em', background:'#666', color:'#fff', marginTop:'8px'}}
+        >
+          🔍 Test Share API
+        </button>
       </div>
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".json"
-        style={{ display: 'none' }}
-        onChange={handleFileSelected}
-      />
+      <input ref={fileInputRef} type="file" accept=".json" style={{ display: 'none' }} onChange={handleFileSelected} />
 
       {confirmImport && (
         <div className="import-confirm">
@@ -256,13 +258,13 @@ export default function ExportPanel({ currentProject, currentSub }) {
       )}
 
       {status && (
-        <p className={status.startsWith('Błąd') ? 'error' : 'od-status-msg'}>
+        <p className={status.startsWith('Błąd') ? 'error' : 'od-status-msg'} style={{wordBreak:'break-all'}}>
           {status}
         </p>
       )}
 
       <p className="od-info" style={{marginTop: '12px'}}>
-        Każdy podprojekt trafia do osobnego pliku TXT.<br/>
+        "Pobierz pliki" → zapisuje do folderu Pobrane → prześlij ręcznie do OneDrive.<br/>
         JSON zawiera pełny backup wraz ze zdjęciami.
       </p>
     </div>
