@@ -67,49 +67,53 @@ function downloadAll(files) {
   }
 }
 
+// Chrome Android limit: maks ~10 plików na jedno share()
+const SHARE_BATCH = 9;
+
 export default function ExportPanel({ currentProject, currentSub }) {
   const [status, setStatus] = useState(null);
   const [confirmImport, setConfirmImport] = useState(false);
   const [pendingData, setPendingData] = useState(null);
   const [preparedData, setPreparedData] = useState(null);
+  // batches: tablica tablic File[] do kolejnych share
+  const [batches, setBatches] = useState(null);
+  const [batchIdx, setBatchIdx] = useState(0);
   const fileInputRef = useRef(null);
   const shareButtonRef = useRef(null);
+  const batchesRef = useRef(null);
+  const batchIdxRef = useRef(0);
   const preparedDataRef = useRef(null);
 
   useEffect(() => { preparedDataRef.current = preparedData; }, [preparedData]);
+  useEffect(() => { batchesRef.current = batches; }, [batches]);
+  useEffect(() => { batchIdxRef.current = batchIdx; }, [batchIdx]);
 
   useEffect(() => {
     const btn = shareButtonRef.current;
     if (!btn) return;
 
     function nativeShareHandler() {
-      const data = preparedDataRef.current;
-      if (!data) return;
+      const bs = batchesRef.current;
+      const idx = batchIdxRef.current;
+      if (!bs || idx >= bs.length) return;
 
-      const txtFiles = data.subFiles.map(f =>
-        new File([f.text], f.name, { type: 'text/plain' })
-      );
-      const photoFiles = data.photos.map(p =>
-        new File([p.blob], p.name, { type: 'image/jpeg' })
-      );
-      const allFiles = [...txtFiles, ...photoFiles];
-
-      if (!navigator.share) {
-        downloadAll(txtFiles);
-        setPreparedData(null); preparedDataRef.current = null;
-        setStatus('Pobrano ' + txtFiles.length + ' plików TXT.');
-        return;
-      }
-
-      // BEZ canShare() — każde wywołanie canShare() zużywa user activation w Chrome Android
-      navigator.share({ files: allFiles, title: 'Dyktafon — notatki' })
+      const batch = bs[idx];
+      navigator.share({ files: batch, title: 'Dyktafon — notatki (' + (idx+1) + '/' + bs.length + ')' })
         .then(() => {
-          setPreparedData(null); preparedDataRef.current = null;
-          setStatus('Udostępniono!');
+          const next = idx + 1;
+          if (next >= bs.length) {
+            setBatches(null); batchesRef.current = null;
+            setBatchIdx(0); batchIdxRef.current = 0;
+            setPreparedData(null); preparedDataRef.current = null;
+            setStatus('Udostępniono wszystko!');
+          } else {
+            setBatchIdx(next); batchIdxRef.current = next;
+            setStatus('Partia ' + idx + '/' + bs.length + ' wysłana. Naciśnij ponownie dla kolejnych ' + bs[next].length + ' plików.');
+          }
         })
         .catch(e => {
           if (e.name !== 'AbortError')
-            setStatus('Błąd: ' + e.message + ' (pliki=' + allFiles.length + ')');
+            setStatus('Błąd: ' + e.message);
           else setStatus(null);
         });
     }
@@ -123,9 +127,27 @@ export default function ExportPanel({ currentProject, currentSub }) {
       setStatus('Przygotowuję...');
       const subFiles = await buildSubprojectFiles();
       if (!subFiles.length) { setStatus('Brak notatek do eksportu.'); return; }
-      const photos = await collectPhotoData();
-      setPreparedData({ subFiles, photos });
-      setStatus('Gotowe: ' + subFiles.length + ' plik(i) TXT + ' + photos.length + ' zdjęć. Naciśnij "Udostępnij teraz".');
+      const photoData = await collectPhotoData();
+
+      const txtFiles = subFiles.map(f => new File([f.text], f.name, { type: 'text/plain' }));
+      const photoFiles = photoData.map(p => new File([p.blob], p.name, { type: 'image/jpeg' }));
+      const allFiles = [...txtFiles, ...photoFiles];
+
+      // Podziel na partie po max SHARE_BATCH plików
+      const bs = [];
+      for (let i = 0; i < allFiles.length; i += SHARE_BATCH) {
+        bs.push(allFiles.slice(i, i + SHARE_BATCH));
+      }
+
+      setBatches(bs); batchesRef.current = bs;
+      setBatchIdx(0); batchIdxRef.current = 0;
+      setPreparedData({ subFiles, photos: photoData });
+
+      const totalFiles = allFiles.length;
+      const msg = bs.length === 1
+        ? 'Gotowe: ' + totalFiles + ' plików. Naciśnij "Udostępnij teraz".'
+        : 'Gotowe: ' + totalFiles + ' plików w ' + bs.length + ' partiach. Naciśnij "Udostępnij teraz" ' + bs.length + 'x.';
+      setStatus(msg);
     } catch (e) { setStatus('Błąd przygotowania: ' + e.message); }
   }
 
@@ -185,6 +207,11 @@ export default function ExportPanel({ currentProject, currentSub }) {
 
   function handleCancelImport() { setConfirmImport(false); setPendingData(null); setStatus(null); }
 
+  const showShareBtn = batches && batchIdx < batches.length;
+  const shareLabel = batches && batches.length > 1
+    ? '🚀 Udostępnij partię ' + (batchIdx+1) + '/' + batches.length
+    : '🚀 Udostępnij teraz';
+
   return (
     <div className="onedrive-panel">
       <h3>☁️ Eksport</h3>
@@ -195,9 +222,9 @@ export default function ExportPanel({ currentProject, currentSub }) {
         <button
           ref={shareButtonRef}
           className="btn btn-share"
-          style={{ display: preparedData ? 'inline-block' : 'none' }}
+          style={{ display: showShareBtn ? 'inline-block' : 'none' }}
         >
-          🚀 Udostępnij teraz
+          {shareLabel}
         </button>
         <button className="btn btn-ms" onClick={handleDownloadAll} style={{background:'#1a73e8'}}>
           ⬇️ Pobierz pliki (Pobrane)
