@@ -16,22 +16,26 @@ function buildFileName(projectName, subName, ext) {
 async function buildSubprojectFiles() {
   const projects = await getProjects();
   const files = [];
+
   for (const project of projects) {
     const subs = await getSubprojects(project.id);
     for (const sub of subs) {
       const notes = await getNotes(sub.id);
       if (!notes.length) continue;
+
       const lines = [
         `PROJEKT: ${project.name}`,
         `PODPROJEKT: ${sub.name}`,
         '='.repeat(50),
         ''
       ];
+
       notes.sort((a, b) => a.createdAt - b.createdAt).forEach(n => {
         lines.push(`[${formatDate(n.createdAt)}]`);
         lines.push(n.text);
         lines.push('');
       });
+
       files.push({
         name: buildFileName(project.name, sub.name, 'txt'),
         text: lines.join('\n')
@@ -41,90 +45,95 @@ async function buildSubprojectFiles() {
   return files;
 }
 
-async function collectPhotoFiles() {
+async function collectPhotoData() {
   const projects = await getProjects();
-  const files = [];
+  const photos = [];
+
   for (const project of projects) {
     const subs = await getSubprojects(project.id);
     for (const sub of subs) {
       const notes = await getNotes(sub.id);
       const base = `${project.name}.${sub.name}`;
       for (const note of notes) {
-        const photos = await getPhotos(note.id);
+        const notePhotos = await getPhotos(note.id);
         const noteDate = new Date(note.createdAt)
           .toLocaleString('pl-PL')
           .replace(/[\s:]/g, '-')
           .replace(/,/g, '');
-        photos.forEach((p, i) => {
+        notePhotos.forEach((p, i) => {
           const name = `${base}_${noteDate}_foto${String(i + 1).padStart(2, '0')}.jpg`;
-          files.push(new File([p.blob], name, { type: 'image/jpeg' }));
+          photos.push({ name, blob: p.blob });
         });
       }
     }
   }
-  return files;
+  return photos;
 }
 
-export default function ExportPanel() {
+export default function ExportPanel({ currentProject, currentSub }) {
   const [status, setStatus] = useState(null);
-  const [preparedFiles, setPreparedFiles] = useState(null);
   const [confirmImport, setConfirmImport] = useState(false);
   const [pendingData, setPendingData] = useState(null);
+  const [preparedData, setPreparedData] = useState(null);
   const fileInputRef = useRef(null);
 
-  // Krok 1: przygotuj pliki w tle (async)
   async function handlePrepare() {
-    setPreparedFiles(null);
-    setStatus('Przygotowuję pliki...');
     try {
+      setStatus('Przygotowuję...');
       const subFiles = await buildSubprojectFiles();
+
       if (!subFiles.length) {
         setStatus('Brak notatek do eksportu.');
         return;
       }
-      const txtFiles = subFiles.map(f =>
-        new File([new Blob([f.text], { type: 'text/plain' })], f.name, { type: 'text/plain' })
-      );
-      const photoFiles = await collectPhotoFiles();
-      const allFiles = [...txtFiles, ...photoFiles];
-      setPreparedFiles(allFiles);
-      setStatus(
-        `Gotowe: ${txtFiles.length} TXT${photoFiles.length > 0 ? ` + ${photoFiles.length} zdjęć` : ''}. Naciśnij "Udostępnij".`
-      );
+
+      const photos = await collectPhotoData();
+      setPreparedData({ subFiles, photos });
+      setStatus(`Gotowe: ${subFiles.length} plik(i) TXT${photos.length > 0 ? ` + ${photos.length} zdjęć` : ''}. Naciśnij "Udostępnij teraz".`);
     } catch (e) {
-      setStatus(`Błąd: ${e.message}`);
+      setStatus(`Błąd przygotowania: ${e.message}`);
     }
   }
 
-  // Krok 2: udostępnij — wywołane bezpośrednio z user gesture, zero async przed share
-  async function handleDoShare() {
-    if (!preparedFiles) return;
-    try {
-      if (navigator.share && navigator.canShare({ files: preparedFiles })) {
-        await navigator.share({ files: preparedFiles, title: 'Dyktafon — notatki' });
-        setPreparedFiles(null);
-        setStatus('Udostępniono!');
-      } else {
-        // Fallback desktop: pobierz pliki TXT
-        const txtFiles = preparedFiles.filter(f => f.type === 'text/plain');
-        for (const file of txtFiles) {
-          const url = URL.createObjectURL(file);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = file.name;
-          a.click();
-          URL.revokeObjectURL(url);
-        }
-        setPreparedFiles(null);
-        setStatus(`Pobrano ${txtFiles.length} plików TXT.`);
+  // WAŻNE: ta funkcja NIE jest async — navigator.share() musi być wywołany
+  // synchronicznie w obsłudze gestu użytkownika, bez żadnego await przed nim.
+  function handleDoShare() {
+    if (!preparedData) return;
+
+    const txtFiles = preparedData.subFiles.map(f =>
+      new File([new Blob([f.text], { type: 'text/plain' })], f.name, { type: 'text/plain' })
+    );
+    const photoFiles = preparedData.photos.map(p =>
+      new File([p.blob], p.name, { type: 'image/jpeg' })
+    );
+    const allFiles = [...txtFiles, ...photoFiles];
+
+    if (!navigator.share) {
+      for (const file of txtFiles) {
+        const url = URL.createObjectURL(file);
+        const a = document.createElement('a');
+        a.href = url; a.download = file.name; a.click();
+        URL.revokeObjectURL(url);
       }
-    } catch (e) {
-      if (e.name !== 'AbortError') setStatus(`Błąd: ${e.message}`);
-      else setStatus(null);
+      setPreparedData(null);
+      setStatus(`Pobrano ${txtFiles.length} plików TXT (brak Web Share API).`);
+      return;
     }
+
+    const canShareAll = navigator.canShare({ files: allFiles });
+    const filesToShare = canShareAll ? allFiles : txtFiles;
+
+    navigator.share({ files: filesToShare, title: 'Dyktafon — notatki' })
+      .then(() => {
+        setPreparedData(null);
+        setStatus(`Udostępniono ${txtFiles.length} plik(i) TXT${canShareAll && photoFiles.length > 0 ? ` + ${photoFiles.length} zdjęć` : photoFiles.length > 0 ? ' (zdjęcia pominięte)' : ''}.`);
+      })
+      .catch(e => {
+        if (e.name !== 'AbortError') setStatus(`Błąd: ${e.message}`);
+        else setStatus(null);
+      });
   }
 
-  // JSON backup — zawsze download (konwersja base64 trwa za długo dla share)
   async function handleShareJson() {
     try {
       setStatus('Przygotowuję kopię zapasową...');
@@ -134,11 +143,11 @@ export default function ExportPanel() {
       const now = new Date();
       const date = now.toLocaleDateString('pl-PL').replace(/\./g, '-');
       const time = now.toTimeString().slice(0, 5).replace(':', '-');
+      const fileName = `Dyktafon_backup_${date}_${time}.json`;
+
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = `Dyktafon_backup_${date}_${time}.json`;
-      a.click();
+      a.href = url; a.download = fileName; a.click();
       URL.revokeObjectURL(url);
       setStatus('Pobrano kopię zapasową — zapisz ją w bezpiecznym miejscu.');
     } catch (e) {
@@ -146,20 +155,25 @@ export default function ExportPanel() {
     }
   }
 
-  function handleImportClick() { fileInputRef.current?.click(); }
+  function handleImportClick() {
+    fileInputRef.current?.click();
+  }
 
   async function handleFileSelected(e) {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = '';
+
     try {
       setStatus('Wczytuję plik...');
       const text = await file.text();
       const data = JSON.parse(text);
+
       if (!data.projects || !data.subprojects || !data.notes) {
         setStatus('Błąd: nieprawidłowy plik kopii zapasowej.');
         return;
       }
+
       setPendingData(data);
       setConfirmImport(true);
       setStatus(null);
@@ -191,14 +205,14 @@ export default function ExportPanel() {
     <div className="onedrive-panel">
       <h3>☁️ Eksport do OneDrive</h3>
       <p className="od-info">
-        Naciśnij "Przygotuj", poczekaj aż pliki będą gotowe, potem naciśnij "Udostępnij".
+        Naciśnij "Przygotuj", poczekaj na potwierdzenie, a potem naciśnij "Udostępnij teraz".
       </p>
 
       <div className="export-buttons">
         <button className="btn btn-ms" onClick={handlePrepare}>
           📦 Przygotuj TXT + zdjęcia
         </button>
-        {preparedFiles && (
+        {preparedData && (
           <button className="btn btn-share" onClick={handleDoShare}>
             🚀 Udostępnij teraz
           </button>
