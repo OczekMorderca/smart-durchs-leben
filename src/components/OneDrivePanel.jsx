@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { exportAllData, importAllData, getProjects, getSubprojects, getNotes, getPhotos } from '../db';
 
 function formatDate(ts) {
@@ -16,26 +16,22 @@ function buildFileName(projectName, subName, ext) {
 async function buildSubprojectFiles() {
   const projects = await getProjects();
   const files = [];
-
   for (const project of projects) {
     const subs = await getSubprojects(project.id);
     for (const sub of subs) {
       const notes = await getNotes(sub.id);
       if (!notes.length) continue;
-
       const lines = [
         `PROJEKT: ${project.name}`,
         `PODPROJEKT: ${sub.name}`,
         '='.repeat(50),
         ''
       ];
-
       notes.sort((a, b) => a.createdAt - b.createdAt).forEach(n => {
         lines.push(`[${formatDate(n.createdAt)}]`);
         lines.push(n.text);
         lines.push('');
       });
-
       files.push({
         name: buildFileName(project.name, sub.name, 'txt'),
         text: lines.join('\n')
@@ -48,7 +44,6 @@ async function buildSubprojectFiles() {
 async function collectPhotoData() {
   const projects = await getProjects();
   const photos = [];
-
   for (const project of projects) {
     const subs = await getSubprojects(project.id);
     for (const sub of subs) {
@@ -76,62 +71,81 @@ export default function ExportPanel({ currentProject, currentSub }) {
   const [pendingData, setPendingData] = useState(null);
   const [preparedData, setPreparedData] = useState(null);
   const fileInputRef = useRef(null);
+  const shareButtonRef = useRef(null);
+  const preparedDataRef = useRef(null);
+
+  useEffect(() => {
+    preparedDataRef.current = preparedData;
+  }, [preparedData]);
+
+  useEffect(() => {
+    const btn = shareButtonRef.current;
+    if (!btn) return;
+
+    function nativeShareHandler() {
+      const data = preparedDataRef.current;
+      if (!data) return;
+
+      const txtFiles = data.subFiles.map(f =>
+        new File([new Blob([f.text], { type: 'text/plain' })], f.name, { type: 'text/plain' })
+      );
+      const photoFiles = data.photos.map(p =>
+        new File([p.blob], p.name, { type: 'image/jpeg' })
+      );
+      const allFiles = [...txtFiles, ...photoFiles];
+
+      if (!navigator.share) {
+        for (const file of txtFiles) {
+          const url = URL.createObjectURL(file);
+          const a = document.createElement('a');
+          a.href = url; a.download = file.name; a.click();
+          URL.revokeObjectURL(url);
+        }
+        setPreparedData(null);
+        preparedDataRef.current = null;
+        setStatus(`Pobrano ${txtFiles.length} plików TXT.`);
+        return;
+      }
+
+      let filesToShare = allFiles;
+      try {
+        if (!navigator.canShare({ files: allFiles })) {
+          filesToShare = txtFiles;
+        }
+      } catch (_) {
+        filesToShare = txtFiles;
+      }
+
+      navigator.share({ files: filesToShare, title: 'Dyktafon — notatki' })
+        .then(() => {
+          setPreparedData(null);
+          preparedDataRef.current = null;
+          setStatus('Udostępniono!');
+        })
+        .catch(e => {
+          if (e.name !== 'AbortError') setStatus(`Błąd: ${e.message}`);
+          else setStatus(null);
+        });
+    }
+
+    btn.addEventListener('click', nativeShareHandler);
+    return () => btn.removeEventListener('click', nativeShareHandler);
+  }, []);
 
   async function handlePrepare() {
     try {
       setStatus('Przygotowuję...');
       const subFiles = await buildSubprojectFiles();
-
       if (!subFiles.length) {
         setStatus('Brak notatek do eksportu.');
         return;
       }
-
       const photos = await collectPhotoData();
       setPreparedData({ subFiles, photos });
       setStatus(`Gotowe: ${subFiles.length} plik(i) TXT${photos.length > 0 ? ` + ${photos.length} zdjęć` : ''}. Naciśnij "Udostępnij teraz".`);
     } catch (e) {
       setStatus(`Błąd przygotowania: ${e.message}`);
     }
-  }
-
-  // WAŻNE: ta funkcja NIE jest async — navigator.share() musi być wywołany
-  // synchronicznie w obsłudze gestu użytkownika, bez żadnego await przed nim.
-  function handleDoShare() {
-    if (!preparedData) return;
-
-    const txtFiles = preparedData.subFiles.map(f =>
-      new File([new Blob([f.text], { type: 'text/plain' })], f.name, { type: 'text/plain' })
-    );
-    const photoFiles = preparedData.photos.map(p =>
-      new File([p.blob], p.name, { type: 'image/jpeg' })
-    );
-    const allFiles = [...txtFiles, ...photoFiles];
-
-    if (!navigator.share) {
-      for (const file of txtFiles) {
-        const url = URL.createObjectURL(file);
-        const a = document.createElement('a');
-        a.href = url; a.download = file.name; a.click();
-        URL.revokeObjectURL(url);
-      }
-      setPreparedData(null);
-      setStatus(`Pobrano ${txtFiles.length} plików TXT (brak Web Share API).`);
-      return;
-    }
-
-    const canShareAll = navigator.canShare({ files: allFiles });
-    const filesToShare = canShareAll ? allFiles : txtFiles;
-
-    navigator.share({ files: filesToShare, title: 'Dyktafon — notatki' })
-      .then(() => {
-        setPreparedData(null);
-        setStatus(`Udostępniono ${txtFiles.length} plik(i) TXT${canShareAll && photoFiles.length > 0 ? ` + ${photoFiles.length} zdjęć` : photoFiles.length > 0 ? ' (zdjęcia pominięte)' : ''}.`);
-      })
-      .catch(e => {
-        if (e.name !== 'AbortError') setStatus(`Błąd: ${e.message}`);
-        else setStatus(null);
-      });
   }
 
   async function handleShareJson() {
@@ -144,7 +158,6 @@ export default function ExportPanel({ currentProject, currentSub }) {
       const date = now.toLocaleDateString('pl-PL').replace(/\./g, '-');
       const time = now.toTimeString().slice(0, 5).replace(':', '-');
       const fileName = `Dyktafon_backup_${date}_${time}.json`;
-
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url; a.download = fileName; a.click();
@@ -163,17 +176,14 @@ export default function ExportPanel({ currentProject, currentSub }) {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = '';
-
     try {
       setStatus('Wczytuję plik...');
       const text = await file.text();
       const data = JSON.parse(text);
-
       if (!data.projects || !data.subprojects || !data.notes) {
         setStatus('Błąd: nieprawidłowy plik kopii zapasowej.');
         return;
       }
-
       setPendingData(data);
       setConfirmImport(true);
       setStatus(null);
@@ -212,11 +222,13 @@ export default function ExportPanel({ currentProject, currentSub }) {
         <button className="btn btn-ms" onClick={handlePrepare}>
           📦 Przygotuj TXT + zdjęcia
         </button>
-        {preparedData && (
-          <button className="btn btn-share" onClick={handleDoShare}>
-            🚀 Udostępnij teraz
-          </button>
-        )}
+        <button
+          ref={shareButtonRef}
+          className="btn btn-share"
+          style={{ display: preparedData ? 'inline-block' : 'none' }}
+        >
+          🚀 Udostępnij teraz
+        </button>
         <button className="btn btn-sync" onClick={handleShareJson}>
           💾 Pobierz JSON (backup)
         </button>
