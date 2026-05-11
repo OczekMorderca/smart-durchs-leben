@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { exportAllData, getProjects, getSubprojects, getNotes, getPhotos } from '../db';
+import { useState, useRef } from 'react';
+import { exportAllData, importAllData, getProjects, getSubprojects, getNotes, getPhotos } from '../db';
 
 function formatDate(ts) {
   return new Date(ts).toLocaleString('pl-PL');
@@ -70,8 +70,11 @@ async function collectPhotoFiles() {
   return files;
 }
 
-export default function ExportPanel({ currentProject, currentSub }) {
+export default function ExportPanel({ currentProject, currentSub, onImportDone }) {
   const [status, setStatus] = useState(null);
+  const [confirmImport, setConfirmImport] = useState(false);
+  const [pendingData, setPendingData] = useState(null);
+  const fileInputRef = useRef(null);
 
   async function handleShareText() {
     try {
@@ -125,7 +128,7 @@ export default function ExportPanel({ currentProject, currentSub }) {
 
   async function handleShareJson() {
     try {
-      setStatus('Przygotowuję...');
+      setStatus('Przygotowuję kopię zapasową...');
       const data = await exportAllData();
       const json = JSON.stringify(data, null, 2);
       const blob = new Blob([json], { type: 'application/json' });
@@ -136,7 +139,7 @@ export default function ExportPanel({ currentProject, currentSub }) {
 
       if (navigator.share && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], title: 'Dyktafon — backup JSON' });
-        setStatus('Udostępniono!');
+        setStatus('Kopia zapasowa udostępniona!');
       } else {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -144,12 +147,58 @@ export default function ExportPanel({ currentProject, currentSub }) {
         a.download = file.name;
         a.click();
         URL.revokeObjectURL(url);
-        setStatus('Pobrano plik — zapisz go do folderu OneDrive.');
+        setStatus('Pobrano kopię zapasową — zapisz ją do folderu OneDrive.');
       }
     } catch (e) {
       if (e.name !== 'AbortError') setStatus(`Błąd: ${e.message}`);
       else setStatus(null);
     }
+  }
+
+  function handleImportClick() {
+    fileInputRef.current?.click();
+  }
+
+  async function handleFileSelected(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    try {
+      setStatus('Wczytuję plik...');
+      const text = await file.text();
+      const data = JSON.parse(text);
+
+      if (!data.projects || !data.subprojects || !data.notes) {
+        setStatus('Błąd: nieprawidłowy plik kopii zapasowej.');
+        return;
+      }
+
+      setPendingData(data);
+      setConfirmImport(true);
+      setStatus(null);
+    } catch {
+      setStatus('Błąd: nie udało się odczytać pliku JSON.');
+    }
+  }
+
+  async function handleConfirmImport() {
+    setConfirmImport(false);
+    try {
+      setStatus('Importuję dane...');
+      await importAllData(pendingData);
+      setPendingData(null);
+      setStatus('Import zakończony! Odświeżam...');
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (e) {
+      setStatus(`Błąd importu: ${e.message}`);
+    }
+  }
+
+  function handleCancelImport() {
+    setConfirmImport(false);
+    setPendingData(null);
+    setStatus(null);
   }
 
   return (
@@ -164,9 +213,30 @@ export default function ExportPanel({ currentProject, currentSub }) {
           📄 Eksportuj TXT + zdjęcia
         </button>
         <button className="btn btn-sync" onClick={handleShareJson}>
-          💾 Eksportuj jako JSON (backup)
+          💾 Eksportuj JSON (backup)
+        </button>
+        <button className="btn btn-import" onClick={handleImportClick}>
+          📥 Importuj z JSON
         </button>
       </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        style={{ display: 'none' }}
+        onChange={handleFileSelected}
+      />
+
+      {confirmImport && (
+        <div className="import-confirm">
+          <p>⚠️ Import nadpisze <strong>wszystkie</strong> obecne dane. Czy na pewno?</p>
+          <div className="import-confirm-buttons">
+            <button className="btn btn-danger" onClick={handleConfirmImport}>Tak, importuj</button>
+            <button className="btn" onClick={handleCancelImport}>Anuluj</button>
+          </div>
+        </div>
+      )}
 
       {status && (
         <p className={status.startsWith('Błąd') ? 'error' : 'od-status-msg'}>
@@ -176,7 +246,7 @@ export default function ExportPanel({ currentProject, currentSub }) {
 
       <p className="od-info" style={{marginTop: '12px'}}>
         Każdy podprojekt trafia do osobnego pliku TXT.<br/>
-        Plik JSON służy do backupu i przywracania danych.
+        JSON zawiera pełny backup wraz ze zdjęciami.
       </p>
     </div>
   );
