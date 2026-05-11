@@ -70,7 +70,7 @@ async function collectPhotoFiles() {
   return files;
 }
 
-export default function ExportPanel({ currentProject, currentSub, onImportDone }) {
+export default function ExportPanel({ currentProject, currentSub }) {
   const [status, setStatus] = useState(null);
   const [confirmImport, setConfirmImport] = useState(false);
   const [pendingData, setPendingData] = useState(null);
@@ -126,6 +126,8 @@ export default function ExportPanel({ currentProject, currentSub, onImportDone }
     }
   }
 
+  // JSON backup — zawsze pobiera jako plik (navigator.share odpada bo
+  // konwersja zdjęć do base64 trwa za długo i wygasa user activation)
   async function handleShareJson() {
     try {
       setStatus('Przygotowuję kopię zapasową...');
@@ -135,23 +137,17 @@ export default function ExportPanel({ currentProject, currentSub, onImportDone }
       const now = new Date();
       const date = now.toLocaleDateString('pl-PL').replace(/\./g, '-');
       const time = now.toTimeString().slice(0, 5).replace(':', '-');
-      const file = new File([blob], `Dyktafon_backup_${date}_${time}.json`, { type: 'application/json' });
+      const fileName = `Dyktafon_backup_${date}_${time}.json`;
 
-      if (navigator.share && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: 'Dyktafon — backup JSON' });
-        setStatus('Kopia zapasowa udostępniona!');
-      } else {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = file.name;
-        a.click();
-        URL.revokeObjectURL(url);
-        setStatus('Pobrano kopię zapasową — zapisz ją do folderu OneDrive.');
-      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.click();
+      URL.revokeObjectURL(url);
+      setStatus('Pobrano kopię zapasową — zapisz ją w bezpiecznym miejscu.');
     } catch (e) {
-      if (e.name !== 'AbortError') setStatus(`Błąd: ${e.message}`);
-      else setStatus(null);
+      setStatus(`Błąd: ${e.message}`);
     }
   }
 
@@ -213,7 +209,7 @@ export default function ExportPanel({ currentProject, currentSub, onImportDone }
           📄 Eksportuj TXT + zdjęcia
         </button>
         <button className="btn btn-sync" onClick={handleShareJson}>
-          💾 Eksportuj JSON (backup)
+          💾 Pobierz JSON (backup)
         </button>
         <button className="btn btn-import" onClick={handleImportClick}>
           📥 Importuj z JSON
