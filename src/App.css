@@ -1,4 +1,4 @@
-/* ===== Reset & Base ===== */
+ęążół/* ===== Reset & Base ===== */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
@@ -388,4 +388,19 @@ body {
 .import-confirm-buttons {
   display: flex;
   gap: 8px;
+}
+
+/* Share now button */
+.btn-share {
+  background: #f0a500;
+  color: #fff;
+  font-weight: 700;
+  animation: pulse 1s ease-in-out infinite;
+}
+.btn-share:hover {
+  background: #d49200;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.75; }
 }
