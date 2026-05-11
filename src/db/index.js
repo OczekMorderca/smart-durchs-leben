@@ -104,11 +104,57 @@ export async function deletePhoto(id) {
   return db.delete('photos', id);
 }
 
-// Export all data as JSON
+// Helpers
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function base64ToBlob(base64) {
+  const res = await fetch(base64);
+  return res.blob();
+}
+
+// Export all data as JSON (włącznie ze zdjęciami jako base64)
 export async function exportAllData() {
   const db = await getDB();
   const projects = await db.getAll('projects');
   const subprojects = await db.getAll('subprojects');
   const notes = await db.getAll('notes');
-  return { projects, subprojects, notes, exportedAt: new Date().toISOString() };
+  const photosRaw = await db.getAll('photos');
+
+  const photos = await Promise.all(photosRaw.map(async (p) => ({
+    ...p,
+    blob: await blobToBase64(p.blob),
+  })));
+
+  return { projects, subprojects, notes, photos, exportedAt: new Date().toISOString() };
+}
+
+// Import all data from JSON (nadpisuje istniejące dane)
+export async function importAllData(data) {
+  const db = await getDB();
+
+  await db.clear('photos');
+  await db.clear('notes');
+  await db.clear('subprojects');
+  await db.clear('projects');
+
+  for (const project of (data.projects || [])) {
+    await db.put('projects', project);
+  }
+  for (const sub of (data.subprojects || [])) {
+    await db.put('subprojects', sub);
+  }
+  for (const note of (data.notes || [])) {
+    await db.put('notes', note);
+  }
+  for (const photo of (data.photos || [])) {
+    const blob = await base64ToBlob(photo.blob);
+    await db.put('photos', { ...photo, blob });
+  }
 }
