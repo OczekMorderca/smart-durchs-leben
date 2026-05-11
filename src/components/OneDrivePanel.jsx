@@ -5,32 +5,44 @@ function formatDate(ts) {
   return new Date(ts).toLocaleString('pl-PL');
 }
 
-async function buildTextExport() {
+function buildFileName(projectName, subName, ext) {
+  const now = new Date();
+  const date = now.toLocaleDateString('pl-PL').replace(/\./g, '-');
+  const time = now.toTimeString().slice(0, 5).replace(':', '-');
+  const base = subName ? `${projectName}.${subName}` : projectName;
+  return `${base}_${date}_${time}.${ext}`;
+}
+
+async function buildSubprojectFiles() {
   const projects = await getProjects();
-  const lines = [`DYKTAFON — eksport ${formatDate(Date.now())}`, '='.repeat(50), ''];
+  const files = [];
 
   for (const project of projects) {
-    lines.push(`PROJEKT: ${project.name}`);
-    lines.push('─'.repeat(40));
     const subs = await getSubprojects(project.id);
-    if (!subs.length) {
-      lines.push('  (brak podprojektów)');
-    }
     for (const sub of subs) {
-      lines.push(`\n  PODPROJEKT: ${sub.name}`);
       const notes = await getNotes(sub.id);
-      if (!notes.length) {
-        lines.push('    (brak notatek)');
-      } else {
-        notes.sort((a, b) => a.createdAt - b.createdAt).forEach(n => {
-          lines.push(`\n    [${formatDate(n.createdAt)}]`);
-          lines.push(`    ${n.text}`);
-        });
-      }
+      if (!notes.length) continue;
+
+      const lines = [
+        `PROJEKT: ${project.name}`,
+        `PODPROJEKT: ${sub.name}`,
+        '='.repeat(50),
+        ''
+      ];
+
+      notes.sort((a, b) => a.createdAt - b.createdAt).forEach(n => {
+        lines.push(`[${formatDate(n.createdAt)}]`);
+        lines.push(n.text);
+        lines.push('');
+      });
+
+      files.push({
+        name: buildFileName(project.name, sub.name, 'txt'),
+        text: lines.join('\n')
+      });
     }
-    lines.push('');
   }
-  return lines.join('\n');
+  return files;
 }
 
 async function collectPhotoFiles() {
@@ -50,7 +62,6 @@ async function collectPhotoFiles() {
           .replace(/,/g, '');
         photos.forEach((p, i) => {
           const name = `${base}_${noteDate}_foto${String(i + 1).padStart(2, '0')}.jpg`;
-          // Wymuszamy image/jpeg — Chrome Share API wymaga ścisłych typów MIME
           files.push(new File([p.blob], name, { type: 'image/jpeg' }));
         });
       }
@@ -62,52 +73,49 @@ async function collectPhotoFiles() {
 export default function ExportPanel({ currentProject, currentSub }) {
   const [status, setStatus] = useState(null);
 
-  function buildFileName(ext) {
-    const now = new Date();
-    const date = now.toLocaleDateString('pl-PL').replace(/\./g, '-');
-    const time = now.toTimeString().slice(0, 5).replace(':', '-');
-    const proj = currentProject?.name ?? 'Dyktafon';
-    const base = currentSub?.name ? `${proj}.${currentSub.name}` : proj;
-    return `${base}_${date}_${time}.${ext}`;
-  }
-
   async function handleShareText() {
     try {
       setStatus('Przygotowuję...');
-      const text = await buildTextExport();
-      const txtBlob = new Blob([text], { type: 'text/plain' });
-      const txtFile = new File([txtBlob], buildFileName('txt'), { type: 'text/plain' });
+      const subFiles = await buildSubprojectFiles();
+
+      if (!subFiles.length) {
+        setStatus('Brak notatek do eksportu.');
+        return;
+      }
+
+      const txtFiles = subFiles.map(f =>
+        new File([new Blob([f.text], { type: 'text/plain' })], f.name, { type: 'text/plain' })
+      );
       const photoFiles = await collectPhotoFiles();
-      const allFiles = [txtFile, ...photoFiles];
+      const allFiles = [...txtFiles, ...photoFiles];
 
       if (navigator.share) {
-        // Próbuj udostępnić wszystko razem
-        if (photoFiles.length === 0 || navigator.canShare({ files: allFiles })) {
+        if (navigator.canShare({ files: allFiles })) {
           await navigator.share({ files: allFiles, title: 'Dyktafon — notatki' });
-          setStatus(`Udostępniono! (${photoFiles.length > 0 ? `tekst + ${photoFiles.length} zdjęć` : 'tylko tekst'})`);
+          setStatus(`Udostępniono ${txtFiles.length} plików TXT${photoFiles.length > 0 ? ` + ${photoFiles.length} zdjęć` : ''}`);
         } else {
-          // canShare nie przeszło dla całości — filtruj tylko udostępnialne zdjęcia
           const sharablePhotos = photoFiles.filter(f => {
             try { return navigator.canShare({ files: [f] }); } catch { return false; }
           });
-          const filesToShare = [txtFile, ...sharablePhotos];
+          const filesToShare = [...txtFiles, ...sharablePhotos];
           if (navigator.canShare({ files: filesToShare })) {
             await navigator.share({ files: filesToShare, title: 'Dyktafon — notatki' });
-            setStatus(`Udostępniono tekst + ${sharablePhotos.length}/${photoFiles.length} zdjęć`);
+            setStatus(`Udostępniono ${txtFiles.length} plików TXT + ${sharablePhotos.length}/${photoFiles.length} zdjęć`);
           } else {
-            // Ostateczny fallback: tylko tekst
-            await navigator.share({ files: [txtFile], title: 'Dyktafon — notatki' });
-            setStatus('Udostępniono tekst (zdjęcia pominięte — nieobsługiwany format)');
+            await navigator.share({ files: txtFiles, title: 'Dyktafon — notatki' });
+            setStatus(`Udostępniono ${txtFiles.length} plików TXT (zdjęcia pominięte)`);
           }
         }
       } else {
-        const url = URL.createObjectURL(txtBlob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = txtFile.name;
-        a.click();
-        URL.revokeObjectURL(url);
-        setStatus('Pobrano plik — zapisz go do folderu OneDrive.');
+        for (const file of txtFiles) {
+          const url = URL.createObjectURL(file);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = file.name;
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+        setStatus(`Pobrano ${txtFiles.length} plików — zapisz je do folderu OneDrive.`);
       }
     } catch (e) {
       if (e.name !== 'AbortError') setStatus(`Błąd: ${e.message}`);
@@ -121,7 +129,10 @@ export default function ExportPanel({ currentProject, currentSub }) {
       const data = await exportAllData();
       const json = JSON.stringify(data, null, 2);
       const blob = new Blob([json], { type: 'application/json' });
-      const file = new File([blob], buildFileName('json'), { type: 'application/json' });
+      const now = new Date();
+      const date = now.toLocaleDateString('pl-PL').replace(/\./g, '-');
+      const time = now.toTimeString().slice(0, 5).replace(':', '-');
+      const file = new File([blob], `Dyktafon_backup_${date}_${time}.json`, { type: 'application/json' });
 
       if (navigator.share && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], title: 'Dyktafon — backup JSON' });
@@ -164,7 +175,7 @@ export default function ExportPanel({ currentProject, currentSub }) {
       )}
 
       <p className="od-info" style={{marginTop: '12px'}}>
-        Plik TXT możesz otworzyć w Notatniku na komputerze.<br/>
+        Każdy podprojekt trafia do osobnego pliku TXT.<br/>
         Plik JSON służy do backupu i przywracania danych.
       </p>
     </div>
