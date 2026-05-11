@@ -20,11 +20,11 @@ async function buildTextExport() {
       lines.push(`\n  PODPROJEKT: ${sub.name}`);
       const notes = await getNotes(sub.id);
       if (!notes.length) {
-        lines.push('  (brak notatek)');
+        lines.push('    (brak notatek)');
       } else {
         notes.sort((a, b) => a.createdAt - b.createdAt).forEach(n => {
-          lines.push(`\n  [${formatDate(n.createdAt)}]`);
-          lines.push(`  ${n.text}`);
+          lines.push(`\n    [${formatDate(n.createdAt)}]`);
+          lines.push(`    ${n.text}`);
         });
       }
     }
@@ -49,9 +49,9 @@ async function collectPhotoFiles() {
           .replace(/[\s:]/g, '-')
           .replace(/,/g, '');
         photos.forEach((p, i) => {
-          const ext = p.mimeType.split('/')[1] || 'jpg';
-          const name = `${base}_${noteDate}_foto${String(i + 1).padStart(2, '0')}.${ext}`;
-          files.push(new File([p.blob], name, { type: p.mimeType }));
+          const name = `${base}_${noteDate}_foto${String(i + 1).padStart(2, '0')}.jpg`;
+          // Wymuszamy image/jpeg — Chrome Share API wymaga ścisłych typów MIME
+          files.push(new File([p.blob], name, { type: 'image/jpeg' }));
         });
       }
     }
@@ -80,9 +80,26 @@ export default function ExportPanel({ currentProject, currentSub }) {
       const photoFiles = await collectPhotoFiles();
       const allFiles = [txtFile, ...photoFiles];
 
-      if (navigator.share && navigator.canShare({ files: allFiles })) {
-        await navigator.share({ files: allFiles, title: 'Dyktafon — notatki' });
-        setStatus(`Udostępniono! (${photoFiles.length > 0 ? `tekst + ${photoFiles.length} zdjęć` : 'tylko tekst'})`);
+      if (navigator.share) {
+        // Próbuj udostępnić wszystko razem
+        if (photoFiles.length === 0 || navigator.canShare({ files: allFiles })) {
+          await navigator.share({ files: allFiles, title: 'Dyktafon — notatki' });
+          setStatus(`Udostępniono! (${photoFiles.length > 0 ? `tekst + ${photoFiles.length} zdjęć` : 'tylko tekst'})`);
+        } else {
+          // canShare nie przeszło dla całości — filtruj tylko udostępnialne zdjęcia
+          const sharablePhotos = photoFiles.filter(f => {
+            try { return navigator.canShare({ files: [f] }); } catch { return false; }
+          });
+          const filesToShare = [txtFile, ...sharablePhotos];
+          if (navigator.canShare({ files: filesToShare })) {
+            await navigator.share({ files: filesToShare, title: 'Dyktafon — notatki' });
+            setStatus(`Udostępniono tekst + ${sharablePhotos.length}/${photoFiles.length} zdjęć`);
+          } else {
+            // Ostateczny fallback: tylko tekst
+            await navigator.share({ files: [txtFile], title: 'Dyktafon — notatki' });
+            setStatus('Udostępniono tekst (zdjęcia pominięte — nieobsługiwany format)');
+          }
+        }
       } else {
         const url = URL.createObjectURL(txtBlob);
         const a = document.createElement('a');
